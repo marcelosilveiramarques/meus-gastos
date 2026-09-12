@@ -178,6 +178,21 @@
       <label style="margin:4px 12px 6px">Dia de fechamento do cartão</label>
       <div style="padding:0 12px 12px"><input type="number" id="cfgClose" placeholder="10" min="1" max="31" oninput="saveCfg()"></div>
     </div>
+    <div class="sect">☁️ Sincronização (Google Sheets)</div>
+    <div class="list" style="padding:6px 4px">
+      <label style="margin:10px 12px 6px">URL do app da Web (termina em /exec)</label>
+      <div style="padding:0 12px 8px"><input type="url" id="cfgSyncUrl" placeholder="https://script.google.com/.../exec" oninput="saveCfg()"></div>
+      <label style="margin:4px 12px 6px">Chave secreta (a mesma do script)</label>
+      <div style="padding:0 12px 10px"><input type="text" id="cfgSyncKey" placeholder="minha-chave-secreta-123" oninput="saveCfg()"></div>
+      <div style="padding:0 12px 6px"><label style="display:flex;justify-content:space-between;align-items:center;margin:4px 0">
+        Sincronizar automaticamente ao salvar
+        <input type="checkbox" id="cfgSyncAuto" style="width:auto" onchange="saveCfg()"></label></div>
+      <div style="display:flex;gap:8px;padding:6px 12px 12px">
+        <button class="btn ghost" style="margin:0;flex:1" onclick="syncPush(true)">⬆️ Enviar p/ nuvem</button>
+        <button class="btn ghost" style="margin:0;flex:1" onclick="syncPull(true)">⬇️ Baixar da nuvem</button>
+      </div>
+      <p class="hint" id="syncStatus" style="padding:0 12px 8px">Não configurado.</p>
+    </div>
     <button class="btn ghost" style="margin-top:14px" onclick="exportData()">Exportar dados (backup)</button>
     <button class="btn del" style="margin-top:10px" onclick="wipeMonth()">Zerar lançamentos deste mês</button>
   </section>
@@ -271,7 +286,12 @@ function load(){
   catch(e){ return seed(); }
 }
 function seed(){ return {"entries": [], "recurring": [{"id": 1, "amount": 2000.0, "desc": "Lena", "cat": "Casa", "src": "cash", "day": 1}, {"id": 2, "amount": 435.0, "desc": "Gás", "cat": "Contas fixas", "src": "cash", "day": 7}, {"id": 3, "amount": 535.0, "desc": "Internet", "cat": "Contas fixas", "src": "cash", "day": 7}, {"id": 4, "amount": 1900.0, "desc": "Condomínio", "cat": "Casa", "src": "cash", "day": 8}, {"id": 5, "amount": 467.0, "desc": "Luz", "cat": "Contas fixas", "src": "cash", "day": 14}], "cfg": {"target": 16000, "close": 10}}; }
-function save(){ localStorage.setItem('gastos_v1', JSON.stringify(DB)); }
+let _syncTimer=null;
+function save(){ localStorage.setItem('gastos_v1', JSON.stringify(DB));
+  if(DB.cfg && DB.cfg.syncAuto && DB.cfg.syncUrl && DB.cfg.syncKey){
+    clearTimeout(_syncTimer); _syncTimer=setTimeout(()=>syncPush(false), 1500);
+  }
+}
 
 // ---------- Recurring materialization ----------
 // Recurring expenses are virtual: computed for the current month, not stored as entries.
@@ -427,8 +447,44 @@ function deleteEntry(){
 function saveCfg(){
   DB.cfg.target=parseFloat(document.getElementById('cfgTarget').value)||0;
   DB.cfg.close=parseInt(document.getElementById('cfgClose').value)||10;
+  DB.cfg.syncUrl=(document.getElementById('cfgSyncUrl').value||'').trim();
+  DB.cfg.syncKey=(document.getElementById('cfgSyncKey').value||'').trim();
+  DB.cfg.syncAuto=document.getElementById('cfgSyncAuto').checked;
   save(); render();
 }
+function syncStatus(msg){ const el=document.getElementById('syncStatus'); if(el) el.textContent=msg; }
+async function syncPush(manual){
+  const u=DB.cfg.syncUrl, k=DB.cfg.syncKey;
+  if(!u||!k){ if(manual)alert('Configure a URL e a chave primeiro.'); return; }
+  try{
+    syncStatus('Enviando...');
+    const r=await fetch(u,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body:JSON.stringify({key:k,data:{entries:DB.entries,recurring:DB.recurring,cfg:stripCfg(DB.cfg)}})});
+    const j=await r.json();
+    if(j.ok){ DB.cfg.lastSync=new Date().toISOString(); save();
+      syncStatus('✅ Enviado '+new Date().toLocaleTimeString('pt-BR')); }
+    else { syncStatus('⚠️ '+(j.error||'erro')); if(manual)alert('Erro: '+(j.error||'')); }
+  }catch(e){ syncStatus('⚠️ Falha de conexão'); if(manual)alert('Falha de conexão. No Wi-Fi da GE o Google pode estar bloqueado — tente pelo 4G.'); }
+}
+async function syncPull(manual){
+  const u=DB.cfg.syncUrl, k=DB.cfg.syncKey;
+  if(!u||!k){ if(manual)alert('Configure a URL e a chave primeiro.'); return; }
+  try{
+    syncStatus('Baixando...');
+    const r=await fetch(u+'?key='+encodeURIComponent(k));
+    const j=await r.json();
+    if(j.ok && j.data){
+      const cloud=j.data;
+      DB.entries=cloud.entries||[]; DB.recurring=cloud.recurring||[];
+      // keep local sync creds, merge cloud cfg
+      const keep={syncUrl:DB.cfg.syncUrl,syncKey:DB.cfg.syncKey,syncAuto:DB.cfg.syncAuto};
+      DB.cfg=Object.assign({}, cloud.cfg||{}, keep);
+      DB.cfg.lastSync=new Date().toISOString(); save(); render();
+      syncStatus('✅ Baixado '+new Date().toLocaleTimeString('pt-BR'));
+    } else { syncStatus('⚠️ '+(j.error||'sem dados')); if(manual)alert('Erro: '+(j.error||'')); }
+  }catch(e){ syncStatus('⚠️ Falha de conexão'); if(manual)alert('Falha de conexão. No Wi-Fi da GE o Google pode estar bloqueado — tente pelo 4G.'); }
+}
+function stripCfg(cfg){ const c=Object.assign({},cfg); return c; }
 function wipeMonth(){
   if(!confirm('Apagar todos os lançamentos esporádicos deste mês? (recorrentes permanecem)'))return;
   const mk=monthKey(today());
@@ -517,6 +573,13 @@ function render(){
   // cfg fields
   document.getElementById('cfgTarget').value=DB.cfg.target||'';
   document.getElementById('cfgClose').value=DB.cfg.close||'';
+  document.getElementById('cfgSyncUrl').value=DB.cfg.syncUrl||'';
+  document.getElementById('cfgSyncKey').value=DB.cfg.syncKey||'';
+  document.getElementById('cfgSyncAuto').checked=!!DB.cfg.syncAuto;
+  if(DB.cfg.syncUrl && DB.cfg.syncKey){
+    const ls=DB.cfg.lastSync?('Última sync: '+new Date(DB.cfg.lastSync).toLocaleString('pt-BR')):'Configurado, ainda não sincronizado.';
+    const el=document.getElementById('syncStatus'); if(el && el.textContent.indexOf('...')<0 && el.textContent.indexOf('✅')<0 && el.textContent.indexOf('⚠️')<0) el.textContent=ls;
+  }
 }
 
 function iconFor(cat){
@@ -605,7 +668,14 @@ function renderCats(M){
 document.getElementById('fAmount').addEventListener('input',calcParcHint);
 document.getElementById('fParcTot').addEventListener('input',calcParcHint);
 
-render();
+// Ao abrir: se sincronização configurada, puxa a versão da nuvem antes de exibir.
+(function(){
+  if(DB.cfg && DB.cfg.syncUrl && DB.cfg.syncKey){
+    syncPull(false).finally(render);
+  } else {
+    render();
+  }
+})();
 </script>
 </body>
 </html>
