@@ -627,11 +627,11 @@ let lastScreen = 'hoje';
 
 function load(){ try{ return migrate(JSON.parse(localStorage.getItem('gastos_v2'))||seed()); }catch(e){ return seed(); } }
 function seed(){ return {entries:[],income:[],invest:[],recurring:[],recurringIncome:[],recurringInvest:[],
-  cfg:{targetGeral:16000,targetCartao:10000,fech:10,venc:17,saldoIni:0,investIni:0}}; }
+  cfg:{targetGeral:0,targetCartao:0,fech:1,venc:1,saldoIni:0,investIni:0}}; }
 function migrate(db){
   db.entries=db.entries||[]; db.income=db.income||[]; db.invest=db.invest||[];
   db.recurring=db.recurring||[]; db.recurringIncome=db.recurringIncome||[]; db.recurringInvest=db.recurringInvest||[];
-  db.cfg=Object.assign({targetGeral:16000,targetCartao:10000,fech:10,venc:17,saldoIni:0,investIni:0}, db.cfg||{});
+  db.cfg=Object.assign({targetGeral:0,targetCartao:0,fech:1,venc:1,saldoIni:0,investIni:0}, db.cfg||{});
   return db;
 }
 function save(){ localStorage.setItem('gastos_v2', JSON.stringify(DB)); }
